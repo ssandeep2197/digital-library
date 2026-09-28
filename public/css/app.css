@@ -1,0 +1,14 @@
+body { background: #f5f6f8; }
+.card { border: 0; box-shadow: 0 1px 2px rgba(0, 0, 0, .06); }
+.stat .value { font-size: 1.75rem; font-weight: 600; line-height: 1.1; }
+.stat .label { font-size: .8rem; color: var(--bs-secondary-color); text-transform: uppercase; letter-spacing: .03em; }
+.table td, .table th { vertical-align: middle; }
+.table-hover tbody tr[data-href] { cursor: pointer; }
+.status-available { background: var(--bs-success); }
+.status-on_loan { background: var(--bs-primary); }
+.status-on_hold { background: var(--bs-warning); color: #000; }
+.status-maintenance { background: var(--bs-secondary); }
+.status-lost { background: var(--bs-danger); }
+.empty { color: var(--bs-secondary-color); text-align: center; padding: 1.5rem 0; }
+.msg-body { white-space: pre-wrap; font-size: .85rem; max-width: 36rem; }
+.barcode { font-family: var(--bs-font-monospace); font-size: .9em; white-space: nowrap; }

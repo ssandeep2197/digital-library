@@ -1,0 +1,23 @@
+{
+  "name": "digital-library",
+  "version": "1.0.0",
+  "description": "Library management platform: book and copy inventory, availability tracking, loans, reservations, and automated email/SMS notifications.",
+  "main": "src/server.js",
+  "private": true,
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "migrate": "node src/db/migrate.js",
+    "seed": "node src/db/seed.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "mysql2": "^3.11.3",
+    "nodemailer": "^6.9.16"
+  }
+}
