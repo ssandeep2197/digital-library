@@ -58,7 +58,7 @@ npm run dev                    # dashboard at http://localhost:3000
 
 The schema is created automatically on startup (`src/db/schema.sql`). Run `npm run migrate` to apply it without starting the server.
 
-To run everything in Docker, use `docker compose up -d --build`.
+To run everything in Docker, use `docker compose up -d --build`. The container runs with `NODE_ENV=production`, so set `API_KEY` in `.env` first.
 
 ## API
 
@@ -94,6 +94,25 @@ Example:
 curl -X POST localhost:3000/api/loans -H 'Content-Type: application/json' \
   -d '{"memberId": 2, "barcode": "LIB-373320-1"}'
 ```
+
+## Deployment (Docker on the VPS)
+
+Live at **https://library.helloworlds.co.in**. The staff pages require the `API_KEY` from the server's `.env`; the catalog is public.
+
+- The app and MySQL run as Docker Compose services in `/opt/digital-library` on the VPS. MySQL data lives in the `digital-library_mysql-data` volume, and MySQL is published only on `127.0.0.1:3307`.
+- The app container is published only on the docker0 bridge (`172.17.0.1:3110`), so it can't be reached directly from the internet.
+- The k3s `ingress-nginx` routes the hostname to that address (`deploy/k8s-ingress.yaml`: a Service without a selector, plus Endpoints and an Ingress). cert-manager (`letsencrypt-prod`) issues the TLS certificate.
+- Production secrets (`API_KEY`, `DB_PASSWORD`, `DB_ROOT_PASSWORD`) were generated on the server and exist only in `/opt/digital-library/.env`. To see the API key: `ssh vps 'grep ^API_KEY /opt/digital-library/.env'`.
+- Notifications run in simulated mode (logged only) until `SMTP_*` / `TWILIO_*` are added to that `.env`.
+
+Redeploy after making changes:
+
+```bash
+rsync -az --delete --exclude node_modules --exclude .env --exclude test --exclude .git ./ vps:/opt/digital-library/
+ssh vps 'cd /opt/digital-library && docker compose up -d --build'
+```
+
+Logs: `ssh vps 'docker logs -f digital-library'`
 
 ## Tests
 

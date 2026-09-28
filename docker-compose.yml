@@ -28,12 +28,15 @@ services:
       - path: .env
         required: false
     environment:
-      NODE_ENV: ${NODE_ENV:-development}
+      NODE_ENV: production
       PORT: 3000
       DB_HOST: mysql
       DB_PORT: 3306
+      TRUST_PROXY: loopback, uniquelocal
+    # On the VPS, BIND_ADDR=172.17.0.1 publishes only on the docker0 bridge: reachable
+    # from the host and the k3s ingress, not from the internet.
     ports:
-      - "127.0.0.1:${HOST_PORT:-3000}:3000"
+      - "${BIND_ADDR:-127.0.0.1}:${HOST_PORT:-3000}:3000"
     depends_on:
       mysql:
         condition: service_healthy
