@@ -239,14 +239,18 @@
         </div>
       </form>
       <div class="card"><div class="table-responsive"><table class="table table-hover mb-0">
-        <thead><tr><th>Title</th><th>Author</th><th>Genre</th><th>ISBN</th><th class="text-end">Availability</th></tr></thead>
+        <thead><tr><th>Title</th><th>Author</th><th>Genre</th><th>ISBN</th><th class="text-end">Availability</th><th></th></tr></thead>
         <tbody>${data.items.length ? data.items.map((b) => `
           <tr data-href="#/books/${b.id}">
             <td class="fw-semibold">${esc(b.title)}</td><td>${esc(b.author)}</td><td>${esc(b.genre || '—')}</td>
             <td class="barcode">${esc(b.isbn || '—')}</td>
             <td class="text-end">${b.totalCopies === 0 ? '<span class="badge text-bg-light">No copies</span>'
               : `<span class="badge ${b.availableCopies ? 'text-bg-success' : 'text-bg-secondary'}">${b.availableCopies} of ${b.totalCopies} available</span>`}</td>
-          </tr>`).join('') : empty(5, 'No books match your search.')}
+            <td class="text-end text-nowrap">
+              <button class="btn btn-sm btn-outline-secondary" data-edit="${b.id}" title="Edit ${esc(b.title)}" aria-label="Edit ${esc(b.title)}"><i class="bi bi-pencil"></i></button>
+              <button class="btn btn-sm btn-outline-danger" data-delete="${b.id}" title="Delete ${esc(b.title)}" aria-label="Delete ${esc(b.title)}"><i class="bi bi-trash"></i></button>
+            </td>
+          </tr>`).join('') : empty(6, s.q || s.genre || s.available ? 'No books match your search.' : 'No books yet. Use “Add book” to add the first one.')}
         </tbody></table></div></div>
       ${pager(data.page, data.limit, data.total, (p) => { s.page = p; render(); })}`;
 
@@ -258,6 +262,18 @@
     };
     view.querySelectorAll('tr[data-href]').forEach((tr) => (tr.onclick = () => (location.hash = tr.dataset.href)));
     view.querySelector('#add-book').onclick = () => bookForm();
+    const byId = new Map(data.items.map((b) => [String(b.id), b]));
+    view.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); bookForm(byId.get(b.dataset.edit)); }));
+    view.querySelectorAll('[data-delete]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); deleteBook(byId.get(b.dataset.delete), b); }));
+  }
+
+  function deleteBook(book, button, after) {
+    const copies = book.totalCopies ? ` and its ${book.totalCopies} cop${book.totalCopies === 1 ? 'y' : 'ies'}` : '';
+    if (!confirm(`Delete “${book.title}”${copies}? Its loan history is deleted too. This cannot be undone.`)) return;
+    act(button, async () => {
+      await api('DELETE', `/api/books/${book.id}`);
+      after?.();
+    }, `Deleted “${book.title}”`);
   }
 
   function bookForm(book) {
@@ -301,7 +317,7 @@
           ${book.description ? `<p class="mt-2 mb-0">${esc(book.description)}</p>` : ''}
         </div>
         <button class="btn btn-outline-secondary" id="edit-book"><i class="bi bi-pencil me-1"></i>Edit</button>
-        <button class="btn btn-outline-danger" id="delete-book" title="Only books without copies can be deleted"><i class="bi bi-trash"></i></button>
+        <button class="btn btn-outline-danger" id="delete-book"><i class="bi bi-trash me-1"></i>Delete</button>
       </div>
 
       <div class="row g-3 mb-4">
@@ -333,6 +349,8 @@
                           .map((s) => `<li><button class="dropdown-item" data-copy="${cp.id}" data-status="${s}">Mark ${STATUS_LABEL[s].toLowerCase()}</button></li>`).join('')}
                         ${cp.status === 'on_loan' ? '<li><span class="dropdown-item-text small text-body-secondary">Check it in first to change status</span></li>' : ''}
                         <li><button class="dropdown-item" data-copy-loc="${cp.id}" data-loc="${esc(cp.location || '')}">Change location</button></li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li><button class="dropdown-item text-danger" data-copy-delete="${cp.id}" data-barcode="${esc(cp.barcode)}">Delete copy</button></li>
                       </ul>
                     </div>
                   </td>
@@ -359,15 +377,7 @@
       </div>`;
 
     view.querySelector('#edit-book').onclick = () => bookForm(book);
-    view.querySelector('#delete-book').onclick = async (e) => {
-      if (!confirm(`Delete “${book.title}”? This cannot be undone.`)) return;
-      e.currentTarget.disabled = true;
-      try {
-        await api('DELETE', `/api/books/${book.id}`);
-        toast('Book deleted');
-        location.hash = '#/catalog';
-      } catch (err) { fail(err); e.currentTarget.disabled = false; }
-    };
+    view.querySelector('#delete-book').onclick = (e) => deleteBook(book, e.currentTarget, () => { location.hash = '#/catalog'; });
     view.querySelector('#add-copy').onclick = () => openForm({
       title: `Add a copy of “${book.title}”`,
       fields: [
@@ -379,6 +389,10 @@
     view.querySelectorAll('[data-status]').forEach((b) => (b.onclick = () =>
       act(b, () => api('PATCH', `/api/copies/${b.dataset.copy}`, { status: b.dataset.status }),
         (r) => (r.heldFor ? `Copy put on hold for member #${r.heldFor.memberId} (next in queue)` : `Copy marked ${STATUS_LABEL[r.status].toLowerCase()}`))));
+    view.querySelectorAll('[data-copy-delete]').forEach((b) => (b.onclick = () => {
+      if (!confirm(`Delete copy ${b.dataset.barcode}? Its loan history is deleted too.`)) return;
+      act(b, () => api('DELETE', `/api/copies/${b.dataset.copyDelete}`), `Copy ${b.dataset.barcode} deleted`);
+    }));
     view.querySelectorAll('[data-copy-loc]').forEach((b) => (b.onclick = () => openForm({
       title: 'Change location',
       fields: [{ name: 'location', label: 'Shelf location', value: b.dataset.loc }],

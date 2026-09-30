@@ -51,10 +51,7 @@ function inventoryRoutes({ catalog, circulation }) {
   r.patch('/books/:id', wrap(async (req, res) =>
     res.json(await catalog.updateBook(v.id(req.params.id, 'id'), bookFields(req.body, { partial: true })))));
 
-  r.delete('/books/:id', wrap(async (req, res) => {
-    await catalog.deleteBook(v.id(req.params.id, 'id'));
-    res.status(204).end();
-  }));
+  r.delete('/books/:id', wrap(async (req, res) => res.json(await catalog.deleteBook(v.id(req.params.id, 'id')))));
 
   r.get('/books/:id/copies', wrap(async (req, res) => res.json({ items: await catalog.listCopies(v.id(req.params.id, 'id')) })));
 
@@ -65,6 +62,8 @@ function inventoryRoutes({ catalog, circulation }) {
     });
     res.status(201).json(copy);
   }));
+
+  r.delete('/copies/:id', wrap(async (req, res) => res.json(await catalog.deleteCopy(v.id(req.params.id, 'id')))));
 
   r.patch('/copies/:id', wrap(async (req, res) => {
     const copyId = v.id(req.params.id, 'id');

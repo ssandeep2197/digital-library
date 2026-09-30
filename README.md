@@ -8,7 +8,7 @@ A Node.js library management API. It tracks books and their physical copies, rep
 
 Open **http://localhost:3000** for the staff dashboard. It's a single-page app served by the same Express server, built with Bootstrap 5 and plain JavaScript, and it runs entirely on the REST API below.
 
-- **Catalog:** search by title, author or ISBN, filter by genre or "available now", and add or edit books.
+- **Catalog:** search by title, author or ISBN, filter by genre or "available now", and add, edit or delete books.
 - **Book page:** availability stats, the copies with their status and location (mark copies lost, in maintenance or available again, move them), and the reservation queue (reserve for a member, cancel).
 - **Circulation desk:** barcode-driven checkout (with member autocomplete) and check-in. The return panel shows any late fine and tells staff when a copy goes on the **hold shelf** instead of back to the stacks. It also lists open, overdue and returned loans, with renew and return buttons.
 - **Members:** search, add, edit and delete members, including their email/SMS preferences and suspension. Each member's page shows their loans (overdue items highlighted, with fines so far), reservations with queue position, fines with a button to record a payment, loan history, and every notification sent to them.
@@ -58,7 +58,7 @@ If `SMTP_HOST` or the Twilio credentials aren't set, that channel runs in **simu
 npm install
 cp .env.example .env
 docker compose up -d mysql     # MySQL 8.4 on 127.0.0.1:3307
-npm run seed                   # creates the schema plus sample books and copies, plus a default member
+npm run seed                   # creates the schema and a default member (no sample books)
 npm run dev                    # dashboard at http://localhost:3000
 ```
 
@@ -75,9 +75,10 @@ Every endpoint except `/healthz`, `/api/info` and `/api/auth/*` requires a signe
 | `GET /api/books?q=&author=&genre=&available=&page=&limit=` | session | Search the catalog |
 | `GET /api/books/:id` | session | Book details with copy counts |
 | `GET /api/books/:id/availability` | session | Counts by status, queue length, next due date |
-| `POST /api/books` · `PATCH /api/books/:id` · `DELETE /api/books/:id` | session | Manage books |
+| `POST /api/books` · `PATCH /api/books/:id` · `DELETE /api/books/:id` | session | Manage books. Delete also removes the book's copies and their history; it's refused while a copy is out or on hold, someone is waiting, or a past loan has an unpaid fine |
 | `GET /api/books/:id/copies` · `POST /api/books/:id/copies` | session | List copies (with due and hold info), add a copy |
 | `PATCH /api/copies/:id` | session | `{ status: available\|lost\|maintenance, location }` |
+| `DELETE /api/copies/:id` | session | Remove a copy (same rules as deleting a book) |
 | `GET /api/books/:id/reservations` | session | Hold queue in pickup order |
 | `POST /api/loans` | session | Checkout: `{ memberId, barcode \| copyId }` |
 | `POST /api/returns` | session | Check-in: `{ barcode \| copyId }` → fine, and `heldFor` if the copy goes to the hold shelf |
@@ -99,7 +100,7 @@ Example:
 
 ```bash
 curl -X POST localhost:3000/api/loans -H 'Content-Type: application/json' \
-  -d '{"memberId": 2, "barcode": "LIB-373320-1"}'
+  -d '{"memberId": 1, "barcode": "BOOK-0001"}'
 ```
 
 ## Deployment (Docker on the VPS)

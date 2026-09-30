@@ -35,7 +35,6 @@ test('integration', { concurrency: false }, async (t) => {
     const patched = await api('PATCH', `/api/books/${clean.id}`, { publishedYear: 2008 });
     assert.equal(patched.body.publishedYear, 2008);
     assert.equal(patched.body.title, 'Clean Code');
-    assert.equal((await api('DELETE', `/api/books/${clean.id}`)).status, 409, 'cannot delete a book with copies');
     assert.equal((await api('GET', '/api/books/9999')).status, 404);
     assert.equal((await api('GET', '/api/nope')).status, 404);
   });
@@ -312,6 +311,37 @@ test('integration', { concurrency: false }, async (t) => {
     assert.deepEqual(left, { l: 0, r: 0, n: 0 });
     // The copy it held went back on the shelf.
     assert.equal((await api('GET', `/api/books/${b.id}/availability`)).body.copies.available, 2);
+  });
+
+  await t.test('books and copies: delete is refused while in use, then removes history', async (t) => {
+    const { api, book, member, pool } = await startTestApp(t);
+    const b = await book('Old Book', 2);
+    const [ada, bob] = [await member(), await member()];
+    const copies = (await api('GET', `/api/books/${b.id}/copies`)).body.items;
+
+    const loan = (await api('POST', '/api/loans', { memberId: ada.id, barcode: b.barcodes[0] })).body;
+    assert.equal((await api('DELETE', `/api/books/${b.id}`)).body.error.code, 'copy_on_loan');
+    assert.equal((await api('DELETE', `/api/copies/${copies[0].id}`)).body.error.code, 'copy_on_loan');
+
+    // Late return leaves an unpaid fine on the copy's history.
+    await pool.query('UPDATE loans SET due_at = ? WHERE id = ?', [inDays(-2.5), loan.loanId]);
+    await api('POST', '/api/returns', { barcode: b.barcodes[0] });
+    assert.equal((await api('DELETE', `/api/copies/${copies[0].id}`)).body.error.code, 'fines_owed');
+    await api('POST', `/api/members/${ada.id}/fines/pay`);
+
+    // Bob reserves: the copy goes on hold for him.
+    const res = (await api('POST', '/api/reservations', { bookId: b.id, memberId: bob.id })).body;
+    assert.equal((await api('DELETE', `/api/books/${b.id}`)).body.error.code, 'copy_on_hold');
+    await api('DELETE', `/api/reservations/${res.reservationId}`);
+
+    assert.deepEqual((await api('DELETE', `/api/copies/${copies[0].id}`)).body, { id: copies[0].id, deleted: true });
+    assert.equal((await api('GET', `/api/books/${b.id}`)).body.totalCopies, 1);
+    assert.deepEqual((await api('DELETE', `/api/books/${b.id}`)).body, { id: b.id, deleted: true, copiesDeleted: 1 });
+    assert.equal((await api('GET', `/api/books/${b.id}`)).status, 404);
+    const [[left]] = await pool.query('SELECT (SELECT COUNT(*) FROM copies) AS c, (SELECT COUNT(*) FROM loans) AS l, (SELECT COUNT(*) FROM reservations) AS r');
+    assert.deepEqual(left, { c: 0, l: 0, r: 0 });
+    // Members and their notification log are untouched.
+    assert.equal((await api('GET', `/api/members/${ada.id}`)).status, 200);
   });
 
   await t.test('dispatcher retries transient failures and stops on permanent ones', async (t) => {

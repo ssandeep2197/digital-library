@@ -1,4 +1,5 @@
 const { notFound, conflict } = require('../errors');
+const { withTransaction } = require('../db');
 
 const escapeLike = (s) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
 
@@ -62,13 +63,50 @@ function createCatalog({ pool }) {
     return getBook(id);
   }
 
+  // Removing books and copies also removes their past loans and reservations. Refused while
+  // a copy is out or held, someone is waiting for the book, or a past loan has an unpaid
+  // fine (deleting it would wipe what the member owes).
+  async function assertCopiesRemovable(conn, copyIds, what) {
+    if (!copyIds.length) return;
+    const [[{ onLoan }]] = await conn.query("SELECT COUNT(*) AS onLoan FROM copies WHERE id IN (?) AND status = 'on_loan'", [copyIds]);
+    if (onLoan) throw conflict(`${what} is checked out. Check it in first.`, 'copy_on_loan');
+    const [[{ held }]] = await conn.query("SELECT COUNT(*) AS held FROM copies WHERE id IN (?) AND status = 'on_hold'", [copyIds]);
+    if (held) throw conflict(`${what} is on hold for a member. Cancel that reservation first.`, 'copy_on_hold');
+    const [[{ fines }]] = await conn.query(
+      'SELECT COUNT(*) AS fines FROM loans WHERE copy_id IN (?) AND returned_at IS NOT NULL AND fine_paid = 0 AND fine_cents > 0',
+      [copyIds],
+    );
+    if (fines) throw conflict(`${what} has an unpaid late fine on a past loan. Record the member's payment first.`, 'fines_owed');
+  }
+
   async function deleteBook(id) {
-    await getBook(id);
-    const [[{ n }]] = await pool.query('SELECT COUNT(*) AS n FROM copies WHERE book_id = ?', [id]);
-    if (n > 0) throw conflict('Remove or mark its copies as lost before deleting a book with copies', 'has_copies');
-    const [[{ r }]] = await pool.query('SELECT COUNT(*) AS r FROM reservations WHERE book_id = ?', [id]);
-    if (r > 0) throw conflict('This book has reservation history and cannot be deleted', 'has_reservations');
-    await pool.query('DELETE FROM books WHERE id = ?', [id]);
+    return withTransaction(pool, async (conn) => {
+      const [[book]] = await conn.query('SELECT * FROM books WHERE id = ? FOR UPDATE', [id]);
+      if (!book) throw notFound(`Book ${id} not found`);
+      const [copies] = await conn.query('SELECT id FROM copies WHERE book_id = ? FOR UPDATE', [id]);
+      const copyIds = copies.map((c) => c.id);
+      await assertCopiesRemovable(conn, copyIds, `A copy of “${book.title}”`);
+      const [[{ waiting }]] = await conn.query("SELECT COUNT(*) AS waiting FROM reservations WHERE book_id = ? AND status IN ('waiting','ready')", [id]);
+      if (waiting) throw conflict(`${waiting} member(s) are waiting for “${book.title}”. Cancel their reservations first.`, 'has_reservations');
+
+      await conn.query('DELETE FROM reservations WHERE book_id = ?', [id]);
+      if (copyIds.length) await conn.query('DELETE FROM loans WHERE copy_id IN (?)', [copyIds]);
+      await conn.query('DELETE FROM copies WHERE book_id = ?', [id]);
+      await conn.query('DELETE FROM books WHERE id = ?', [id]);
+      return { id, deleted: true, copiesDeleted: copyIds.length };
+    });
+  }
+
+  async function deleteCopy(copyId) {
+    return withTransaction(pool, async (conn) => {
+      const [[copy]] = await conn.query('SELECT * FROM copies WHERE id = ? FOR UPDATE', [copyId]);
+      if (!copy) throw notFound(`Copy ${copyId} not found`);
+      await assertCopiesRemovable(conn, [copy.id], `Copy ${copy.barcode}`);
+      await conn.query('UPDATE reservations SET copy_id = NULL WHERE copy_id = ?', [copy.id]);
+      await conn.query('DELETE FROM loans WHERE copy_id = ?', [copy.id]);
+      await conn.query('DELETE FROM copies WHERE id = ?', [copy.id]);
+      return { id: copy.id, deleted: true };
+    });
   }
 
   async function listCopies(bookId) {
@@ -137,7 +175,7 @@ function createCatalog({ pool }) {
     };
   }
 
-  return { listBooks, getBook, createBook, updateBook, deleteBook, listCopies, getCopy, addCopy, updateCopyLocation, availability };
+  return { listBooks, getBook, createBook, updateBook, deleteBook, deleteCopy, listCopies, getCopy, addCopy, updateCopyLocation, availability };
 }
 
 function bookOut(b) {
