@@ -11,7 +11,7 @@ Open **http://localhost:3000** for the staff dashboard. It's a single-page app s
 - **Catalog:** search by title, author or ISBN, filter by genre or "available now", and add or edit books.
 - **Book page:** availability stats, the copies with their status and location (mark copies lost, in maintenance or available again, move them), and the reservation queue (reserve for a member, cancel).
 - **Circulation desk:** barcode-driven checkout (with member autocomplete) and check-in. The return panel shows any late fine and tells staff when a copy goes on the **hold shelf** instead of back to the stacks. It also lists open, overdue and returned loans, with renew and return buttons.
-- **Members:** search, add and edit members, including their email/SMS preferences and suspension. Each member's page shows their loans (overdue items highlighted, with fines so far), reservations with queue position, fines with a button to record a payment, loan history, and every notification sent to them.
+- **Members:** search, add, edit and delete members, including their email/SMS preferences and suspension. Each member's page shows their loans (overdue items highlighted, with fines so far), reservations with queue position, fines with a button to record a payment, loan history, and every notification sent to them.
 - **Notifications:** the full email/SMS log, filtered by status or channel. It shows delivery errors, lets you retry failed messages, and has a **Run reminders now** button.
 
 ## Authentication
@@ -58,7 +58,7 @@ If `SMTP_HOST` or the Twilio credentials aren't set, that channel runs in **simu
 npm install
 cp .env.example .env
 docker compose up -d mysql     # MySQL 8.4 on 127.0.0.1:3307
-npm run seed                   # creates the schema plus sample books, copies and members
+npm run seed                   # creates the schema plus sample books and copies, plus a default member
 npm run dev                    # dashboard at http://localhost:3000
 ```
 
@@ -84,7 +84,7 @@ Every endpoint except `/healthz`, `/api/info` and `/api/auth/*` requires a signe
 | `POST /api/loans/:id/renew` | session | Renew a loan |
 | `GET /api/loans?status=open\|overdue\|returned` | session | Circulation lists |
 | `POST /api/reservations` · `DELETE /api/reservations/:id` | session | Reserve `{ bookId, memberId }`, cancel |
-| `GET/POST /api/members` · `GET/PATCH /api/members/:id` | session | Members and their notification preferences |
+| `GET/POST /api/members` · `GET/PATCH/DELETE /api/members/:id` | session | Members and their notification preferences. Delete is refused while they have books out, active reservations or unpaid fines; it also removes their history |
 | `GET /api/members/:id/account` | session | Open loans, reservations with queue position, fines |
 | `GET /api/members/:id/history` · `/notifications` | session | Loan history, notification log |
 | `POST /api/members/:id/fines/pay` | session | Settle returned-item fines |

@@ -1,4 +1,4 @@
-// Loads a small sample catalog and a few members so the API has something to show.
+// Loads a small sample catalog and a default member so the API has something to show.
 // Safe to re-run: existing ISBNs, barcodes and emails are skipped.
 const config = require('../config');
 const { createPool, migrate } = require('.');
@@ -11,11 +11,8 @@ const books = [
   { isbn: '9780062316097', title: 'Sapiens', author: 'Yuval Noah Harari', publisher: 'Harper', published_year: 2015, genre: 'History', copies: 1 },
 ];
 
-const members = [
-  { name: 'Ada Lovelace', email: 'ada@example.com', phone: '+15550100001', notify_sms: 1 },
-  { name: 'Alan Turing', email: 'alan@example.com', phone: null, notify_sms: 0 },
-  { name: 'Grace Hopper', email: 'grace@example.com', phone: '+15550100003', notify_sms: 1 },
-];
+// The repo is public, so this is a placeholder address; change it on the member's page.
+const members = [{ name: 'Sandeep Singh', email: 'sandeep@example.com', phone: null, notify_sms: 0 }];
 
 (async () => {
   const pool = createPool(config.db);

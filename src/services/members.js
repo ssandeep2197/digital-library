@@ -1,4 +1,5 @@
 const { notFound, conflict } = require('../errors');
+const { withTransaction } = require('../db');
 const { daysOverdue, fineFor } = require('../policy');
 
 function createMembers({ pool, config, circulation }) {
@@ -149,7 +150,29 @@ function createMembers({ pool, config, circulation }) {
     return { page, limit, items: rows.map(notificationOut) };
   }
 
-  return { list, get, create, update, account, payFines, history, notifications };
+  // Removes a member and their past records (returned loans, closed reservations, sent
+  // notifications). Refused while they still have books out, active reservations or unpaid
+  // fines, so nothing the library is owed or holding for them disappears.
+  async function remove(id) {
+    return withTransaction(pool, async (conn) => {
+      const [[member]] = await conn.query('SELECT * FROM members WHERE id = ? FOR UPDATE', [id]);
+      if (!member) throw notFound(`Member ${id} not found`);
+      const [[{ loans }]] = await conn.query('SELECT COUNT(*) AS loans FROM loans WHERE member_id = ? AND returned_at IS NULL', [id]);
+      if (loans) throw conflict(`${member.name} still has ${loans} book(s) checked out. Check them in first.`, 'has_loans');
+      const [[{ holds }]] = await conn.query("SELECT COUNT(*) AS holds FROM reservations WHERE member_id = ? AND status IN ('waiting','ready')", [id]);
+      if (holds) throw conflict(`${member.name} has ${holds} active reservation(s). Cancel them first.`, 'has_reservations');
+      const owed = await circulation.outstandingFines(id);
+      if (owed) throw conflict(`${member.name} has unpaid fines. Record the payment first.`, 'fines_owed');
+
+      await conn.query('DELETE FROM notifications WHERE member_id = ?', [id]);
+      await conn.query('DELETE FROM reservations WHERE member_id = ?', [id]);
+      await conn.query('DELETE FROM loans WHERE member_id = ?', [id]);
+      await conn.query('DELETE FROM members WHERE id = ?', [id]);
+      return { id, deleted: true };
+    });
+  }
+
+  return { list, get, create, update, remove, account, payFines, history, notifications };
 }
 
 function memberOut(m) {

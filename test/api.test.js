@@ -288,6 +288,32 @@ test('integration', { concurrency: false }, async (t) => {
     assert.equal((await api('GET', '/api/members?q=Member')).body.total, 1);
   });
 
+  await t.test('members: delete is refused while they owe or hold anything, then removes history', async (t) => {
+    const { api, book, member, pool } = await startTestApp(t);
+    const b = await book('Delete Me', 2);
+    const ada = await member();
+
+    const loan = (await api('POST', '/api/loans', { memberId: ada.id, barcode: b.barcodes[0] })).body;
+    assert.equal((await api('DELETE', `/api/members/${ada.id}`)).body.error.code, 'has_loans');
+
+    await pool.query('UPDATE loans SET due_at = ? WHERE id = ?', [inDays(-2.5), loan.loanId]);
+    await api('POST', '/api/returns', { barcode: b.barcodes[0] });
+    assert.equal((await api('DELETE', `/api/members/${ada.id}`)).body.error.code, 'fines_owed');
+    await api('POST', `/api/members/${ada.id}/fines/pay`);
+
+    const res = (await api('POST', '/api/reservations', { bookId: b.id, memberId: ada.id })).body;
+    assert.equal((await api('DELETE', `/api/members/${ada.id}`)).body.error.code, 'has_reservations');
+    await api('DELETE', `/api/reservations/${res.reservationId}`);
+
+    assert.deepEqual((await api('DELETE', `/api/members/${ada.id}`)).body, { id: ada.id, deleted: true });
+    assert.equal((await api('GET', `/api/members/${ada.id}`)).status, 404);
+    assert.equal((await api('DELETE', `/api/members/${ada.id}`)).status, 404);
+    const [[left]] = await pool.query('SELECT (SELECT COUNT(*) FROM loans) AS l, (SELECT COUNT(*) FROM reservations) AS r, (SELECT COUNT(*) FROM notifications) AS n');
+    assert.deepEqual(left, { l: 0, r: 0, n: 0 });
+    // The copy it held went back on the shelf.
+    assert.equal((await api('GET', `/api/books/${b.id}/availability`)).body.copies.available, 2);
+  });
+
   await t.test('dispatcher retries transient failures and stops on permanent ones', async (t) => {
     let calls = 0;
     const flaky = { mode: 'test', send: async () => { calls++; if (calls < 3) throw new DeliveryError('421 try later'); return { providerId: 'ok' }; } };

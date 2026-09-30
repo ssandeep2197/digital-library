@@ -542,18 +542,33 @@
         <input class="form-control" name="q" placeholder="Search name, email or phone" value="${esc(s.q)}" aria-label="Search members">
         <button class="btn btn-outline-primary" type="submit">Search</button></div></form>
       <div class="card"><div class="table-responsive"><table class="table table-hover mb-0">
-        <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Notifications</th><th>Status</th></tr></thead>
+        <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Notifications</th><th>Status</th><th></th></tr></thead>
         <tbody>${data.items.length ? data.items.map((m) => `
           <tr data-href="#/members/${m.id}">
             <td class="fw-semibold">${esc(m.name)}</td><td>${esc(m.email)}</td><td>${esc(m.phone || '—')}</td>
             <td>${m.notifyEmail ? '<i class="bi bi-envelope me-2" title="Email"></i>' : ''}${m.notifySms ? '<i class="bi bi-phone" title="SMS"></i>' : ''}${!m.notifyEmail && !m.notifySms ? '<span class="text-body-secondary">Off</span>' : ''}</td>
             <td><span class="badge ${m.status === 'active' ? 'text-bg-success' : 'text-bg-danger'}">${esc(m.status)}</span></td>
-          </tr>`).join('') : empty(5, 'No members found.')}
+            <td class="text-end text-nowrap">
+              <button class="btn btn-sm btn-outline-secondary" data-edit="${m.id}" title="Edit ${esc(m.name)}" aria-label="Edit ${esc(m.name)}"><i class="bi bi-pencil"></i></button>
+              <button class="btn btn-sm btn-outline-danger" data-delete="${m.id}" title="Delete ${esc(m.name)}" aria-label="Delete ${esc(m.name)}"><i class="bi bi-trash"></i></button>
+            </td>
+          </tr>`).join('') : empty(6, 'No members found.')}
         </tbody></table></div></div>
       ${pager(data.page, data.limit, data.total, (p) => { s.page = p; render(); })}`;
     view.querySelector('#search').onsubmit = (e) => { e.preventDefault(); Object.assign(s, { q: e.currentTarget.q.value.trim(), page: 1 }); render(); };
     view.querySelectorAll('tr[data-href]').forEach((tr) => (tr.onclick = () => (location.hash = tr.dataset.href)));
     view.querySelector('#add-member').onclick = () => memberForm();
+    const byId = new Map(data.items.map((m) => [String(m.id), m]));
+    view.querySelectorAll('[data-edit]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); memberForm(byId.get(b.dataset.edit)); }));
+    view.querySelectorAll('[data-delete]').forEach((b) => (b.onclick = (e) => { e.stopPropagation(); deleteMember(byId.get(b.dataset.delete), b); }));
+  }
+
+  function deleteMember(member, button, after) {
+    if (!confirm(`Delete ${member.name}? Their loan history and notification log are deleted too. This cannot be undone.`)) return;
+    act(button, async () => {
+      await api('DELETE', `/api/members/${member.id}`);
+      after?.();
+    }, `Deleted ${member.name}`);
   }
 
   async function memberView(id) {
@@ -574,6 +589,7 @@
             · Notifications: ${[m.notifyEmail && 'email', m.notifySms && 'SMS'].filter(Boolean).join(' + ') || 'off'}</div>
         </div>
         <button class="btn btn-outline-secondary" id="edit-member"><i class="bi bi-pencil me-1"></i>Edit</button>
+        <button class="btn btn-outline-danger" id="delete-member"><i class="bi bi-trash me-1"></i>Delete</button>
       </div>
 
       ${f.borrowingBlocked ? `<div class="alert alert-danger"><i class="bi bi-exclamation-octagon me-2"></i>Borrowing is blocked: this member owes ${money(f.totalCents)}.</div>` : ''}
@@ -644,6 +660,7 @@
       </div>`;
 
     view.querySelector('#edit-member').onclick = () => memberForm(m);
+    view.querySelector('#delete-member').onclick = (e) => deleteMember(m, e.currentTarget, () => { location.hash = '#/members'; });
     view.querySelector('#pay')?.addEventListener('click', (e) => act(e.currentTarget, () => api('POST', `/api/members/${m.id}/fines/pay`), 'Payment recorded'));
     view.querySelectorAll('[data-renew]').forEach((b) => (b.onclick = () =>
       act(b, () => api('POST', `/api/loans/${b.dataset.renew}/renew`), (r) => `Renewed — now due ${fmtDate(r.dueAt)}`)));

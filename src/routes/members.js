@@ -34,6 +34,7 @@ function memberRoutes({ members }) {
   r.post('/members', wrap(async (req, res) => res.status(201).json(await members.create(memberFields(req.body, { partial: false })))));
   r.get('/members/:id', wrap(async (req, res) => res.json(await members.get(memberId(req)))));
   r.patch('/members/:id', wrap(async (req, res) => res.json(await members.update(memberId(req), memberFields(req.body, { partial: true })))));
+  r.delete('/members/:id', wrap(async (req, res) => res.json(await members.remove(memberId(req)))));
   r.get('/members/:id/account', wrap(async (req, res) => res.json(await members.account(memberId(req)))));
   r.get('/members/:id/history', wrap(async (req, res) => res.json(await members.history(memberId(req), v.paging(req.query)))));
   r.get('/members/:id/notifications', wrap(async (req, res) => res.json(await members.notifications(memberId(req), v.paging(req.query)))));
