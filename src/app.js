@@ -1,8 +1,8 @@
-const path = require('path');
 const express = require('express');
 const { HttpError } = require('./errors');
 const { createAuth } = require('./auth');
 const { authRoutes } = require('./routes/auth');
+const { PUBLIC_DIR, sendPage, staticCacheHeaders } = require('./pages');
 const { catalogReadRoutes, inventoryRoutes } = require('./routes/catalog');
 const { memberRoutes } = require('./routes/members');
 const { circulationRoutes } = require('./routes/circulation');
@@ -49,8 +49,7 @@ function createApp({ pool, config, services, dispatcher, notifyModes = {}, log =
 
   // Public: static assets (the login page needs its CSS/JS; the dashboard's JS holds no data),
   // the login flow, and the library's name for the login screen.
-  const publicDir = path.join(__dirname, '..', 'public');
-  app.use(express.static(publicDir, { index: false, maxAge: config.production ? '1h' : 0 }));
+  app.use(staticCacheHeaders, express.static(PUBLIC_DIR, { index: false, cacheControl: false }));
   app.use(authRoutes(auth, log));
   app.get('/api/info', (req, res) => {
     const user = auth.currentUser(req);
@@ -69,7 +68,7 @@ function createApp({ pool, config, services, dispatcher, notifyModes = {}, log =
 
   // Everything below requires a signed-in session.
   app.use(auth.requireAuth);
-  app.get('/', (req, res) => res.sendFile(path.join(publicDir, 'index.html')));
+  app.get('/', (req, res) => sendPage(res, 'index.html'));
   app.use('/api', catalogReadRoutes(services));
   app.use('/api', inventoryRoutes(services));
   app.use('/api', memberRoutes(services));

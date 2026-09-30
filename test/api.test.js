@@ -67,7 +67,12 @@ test('integration', { concurrency: false }, async (t) => {
     assert.match(good.headers.get('set-cookie'), /HttpOnly/i);
     assert.equal((await good.json()).next, '/', 'open redirects are rejected');
     assert.equal((await api('GET', '/api/books')).status, 200);
-    assert.match(await (await fetch(`${base}/`, { headers: { Cookie: session } })).text(), /<script src="\/js\/app.js">/);
+    const dash = await fetch(`${base}/`, { headers: { Cookie: session } });
+    assert.equal(dash.headers.get('cache-control'), 'no-cache');
+    const appJs = (await dash.text()).match(/<script src="(\/js\/app\.js\?v=[0-9a-f]{10})">/);
+    assert.ok(appJs, 'dashboard script URL is fingerprinted');
+    assert.match((await fetch(base + appJs[1])).headers.get('cache-control'), /immutable/);
+    assert.equal((await fetch(`${base}/js/app.js`)).headers.get('cache-control'), 'no-cache');
     const again = await fetch(`${base}/login?next=/%23/desk`, { headers: { Cookie: session }, redirect: 'manual' });
     assert.deepEqual([again.status, again.headers.get('location')], [302, '/#/desk']);
     const info = (await api('GET', '/api/info')).body;

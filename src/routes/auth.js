@@ -1,8 +1,6 @@
-const path = require('path');
 const express = require('express');
 const { createLoginLimiter, safeNext, unauthorized } = require('../auth');
-
-const LOGIN_PAGE = path.join(__dirname, '..', '..', 'public', 'login.html');
+const { sendPage } = require('../pages');
 
 // Login page and session endpoints. Mounted before requireAuth, so these are public.
 function authRoutes(auth, log = console) {
@@ -11,7 +9,7 @@ function authRoutes(auth, log = console) {
 
   router.get('/login', (req, res) => {
     if (!auth.enabled || auth.currentUser(req)) return res.redirect(safeNext(req.query.next));
-    res.sendFile(LOGIN_PAGE);
+    sendPage(res, 'login.html');
   });
 
   router.post('/api/auth/login', (req, res) => {
