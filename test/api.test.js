@@ -15,8 +15,7 @@ test('integration', { concurrency: false }, async (t) => {
   await t.test('catalog: public reads, staff-only writes, validation, search', async (t) => {
     const { api, book } = await startTestApp(t);
 
-    assert.equal((await api('POST', '/api/books', { title: 'X', author: 'Y' }, { key: null })).status, 401);
-    assert.equal((await api('POST', '/api/books', { title: 'X', author: 'Y' }, { key: 'wrong' })).status, 401);
+
     assert.equal((await api('POST', '/api/books', { author: 'Y' })).status, 400);
     assert.equal((await api('POST', '/api/books', { title: 'X', author: 'Y', isbn: '123' })).status, 400);
 
@@ -25,7 +24,7 @@ test('integration', { concurrency: false }, async (t) => {
     assert.equal((await api('POST', '/api/books', { title: 'Dup', author: 'Y', isbn: '9780132350884' })).status, 409);
     assert.equal((await api('POST', `/api/books/${clean.id}/copies`, { barcode: clean.barcodes[0] })).status, 409);
 
-    const pub = await api('GET', '/api/books?q=clean', undefined, { key: null });
+    const pub = await api('GET', '/api/books?q=clean');
     assert.equal(pub.status, 200);
     assert.equal(pub.body.total, 1);
     assert.equal(pub.body.items[0].availableCopies, 2);
@@ -39,17 +38,62 @@ test('integration', { concurrency: false }, async (t) => {
     assert.equal((await api('DELETE', `/api/books/${clean.id}`)).status, 409, 'cannot delete a book with copies');
     assert.equal((await api('GET', '/api/books/9999')).status, 404);
     assert.equal((await api('GET', '/api/nope')).status, 404);
-
-    const info = await api('GET', '/api/info', undefined, { key: null });
-    assert.deepEqual([info.status, info.body.authRequired, info.body.policy.loanDays], [200, true, 14]);
   });
 
-  await t.test('serves the staff dashboard', async (t) => {
-    const { base } = await startTestApp(t);
-    const html = await (await fetch(`${base}/`)).text();
-    assert.match(html, /<script src="\/js\/app.js">/);
-    assert.equal((await fetch(`${base}/js/app.js`)).status, 200);
-    assert.equal((await fetch(`${base}/css/app.css`)).status, 200);
+  await t.test('login: sessions protect the dashboard and API', async (t) => {
+    const { api, base, login, session } = await startTestApp(t);
+    const anon = { cookie: null };
+
+    // Signed out: API is 401, the dashboard redirects to the login page, login assets are public.
+    assert.equal((await api('GET', '/api/books', undefined, anon)).status, 401);
+    assert.equal((await api('POST', '/api/books', { title: 'X', author: 'Y' }, anon)).status, 401);
+    assert.equal((await api('GET', '/api/books', undefined, { cookie: 'dl_session=forged.token.value' })).status, 401);
+    const page = await fetch(`${base}/`, { redirect: 'manual' });
+    assert.deepEqual([page.status, page.headers.get('location')], [302, '/login?next=%2F']);
+    assert.match(await (await fetch(`${base}/login`)).text(), /id="login-form"/);
+    assert.equal((await fetch(`${base}/js/login.js`)).status, 200);
+    const publicInfo = (await api('GET', '/api/info', undefined, anon)).body;
+    assert.deepEqual(publicInfo, { libraryName: 'Test Library', authEnabled: true }, 'no policy details before sign-in');
+
+    // Wrong credentials.
+    const bad = await login('staff', 'nope');
+    assert.deepEqual([bad.status, bad.body.error.code, bad.cookie], [401, 'unauthorized', '']);
+
+    // Signed in: cookie is httpOnly, dashboard and API work, /login bounces back.
+    const good = await fetch(`${base}/api/auth/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'staff', password: 'test-pass', next: '//evil.example' }),
+    });
+    assert.match(good.headers.get('set-cookie'), /HttpOnly/i);
+    assert.equal((await good.json()).next, '/', 'open redirects are rejected');
+    assert.equal((await api('GET', '/api/books')).status, 200);
+    assert.match(await (await fetch(`${base}/`, { headers: { Cookie: session } })).text(), /<script src="\/js\/app.js">/);
+    const again = await fetch(`${base}/login?next=/%23/desk`, { headers: { Cookie: session }, redirect: 'manual' });
+    assert.deepEqual([again.status, again.headers.get('location')], [302, '/#/desk']);
+    const info = (await api('GET', '/api/info')).body;
+    assert.deepEqual([info.user, info.policy.loanDays], ['staff', 14]);
+
+    // Cross-site writes are blocked even with a valid session.
+    const csrf = await api('POST', '/api/books', { title: 'X', author: 'Y' }, { headers: { Origin: 'https://evil.example' } });
+    assert.equal(csrf.status, 403);
+
+    // Logout clears the cookie.
+    const out = await fetch(`${base}/api/auth/logout`, { method: 'POST', headers: { Cookie: session } });
+    assert.match(out.headers.get('set-cookie'), /dl_session=;/);
+  });
+
+  await t.test('login: repeated failures are rate limited', async (t) => {
+    const { login } = await startTestApp(t);
+    for (let i = 0; i < 10; i++) assert.equal((await login('staff', `wrong-${i}`)).status, 401);
+    const blocked = await login('staff', 'test-pass');
+    assert.deepEqual([blocked.status, blocked.body.error.code], [429, 'too_many_attempts']);
+  });
+
+  await t.test('without ADMIN_USER/ADMIN_PASSWORD (development) everything is open', async (t) => {
+    const { api, base } = await startTestApp(t, { admin: { user: '', password: '' } });
+    assert.equal((await api('GET', '/api/members')).status, 200);
+    assert.equal((await fetch(`${base}/`)).status, 200);
+    assert.equal((await fetch(`${base}/login`, { redirect: 'manual' })).status, 302);
   });
 
   await t.test('checkout and return update availability and charge late fines', async (t) => {

@@ -6,11 +6,16 @@ const { createEmailTransport, createSmsTransport } = require('./notify/transport
 const { startScheduler } = require('./scheduler');
 
 async function main() {
-  if (config.production && config.apiKey.length < 24) {
-    console.error('Refusing to start in production: API_KEY must be set to at least 24 characters (e.g. `openssl rand -hex 24`).');
-    process.exit(1);
+  if (config.production) {
+    const problems = [];
+    if (!config.admin.user || !config.admin.password) problems.push('ADMIN_USER and ADMIN_PASSWORD must be set');
+    if (config.jwtSecret.length < 32) problems.push('JWT_SECRET must be at least 32 characters (e.g. `openssl rand -hex 32`)');
+    if (problems.length) {
+      console.error(`Refusing to start in production: ${problems.join('; ')}.`);
+      process.exit(1);
+    }
   }
-  if (!config.apiKey) console.warn('[auth] API_KEY not set: staff endpoints are open to anyone (development only).');
+  if (!config.admin.user || !config.admin.password) console.warn('[auth] ADMIN_USER/ADMIN_PASSWORD not set: dashboard is open to anyone (development only).');
 
   const pool = createPool(config.db);
   await migrate(pool);

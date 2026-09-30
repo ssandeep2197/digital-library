@@ -1,8 +1,9 @@
 const path = require('path');
 const express = require('express');
 const { HttpError } = require('./errors');
-const { requireApiKey } = require('./routes/helpers');
-const { publicCatalogRoutes, inventoryRoutes } = require('./routes/catalog');
+const { createAuth } = require('./auth');
+const { authRoutes } = require('./routes/auth');
+const { catalogReadRoutes, inventoryRoutes } = require('./routes/catalog');
 const { memberRoutes } = require('./routes/members');
 const { circulationRoutes } = require('./routes/circulation');
 const { createCatalog } = require('./services/catalog');
@@ -38,23 +39,38 @@ function createApp({ pool, config, services, dispatcher, notifyModes = {}, log =
     return result;
   };
 
-  // Staff dashboard (static single-page app that talks to the API below).
-  app.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: config.production ? '1h' : 0 }));
-
-  // Public: what the dashboard needs before the user has entered an API key.
-  app.get('/api/info', (req, res) => {
-    const { loanDays, maxLoans, maxRenewals, holdDays, finePerDayCents, maxFineCents } = config.policy;
-    res.json({
-      libraryName: config.libraryName,
-      authRequired: Boolean(config.apiKey),
-      email: notifyModes.email || null,
-      sms: notifyModes.sms || null,
-      policy: { loanDays, maxLoans, maxRenewals, holdDays, finePerDayCents, maxFineCents },
-    });
+  const auth = createAuth({
+    user: config.admin.user,
+    password: config.admin.password,
+    secret: config.jwtSecret,
+    ttlHours: config.sessionTtlHours,
+    secureCookie: config.baseUrl.startsWith('https://'),
   });
 
-  app.use('/api', publicCatalogRoutes(services));
-  app.use('/api', requireApiKey(config.apiKey));
+  // Public: static assets (the login page needs its CSS/JS; the dashboard's JS holds no data),
+  // the login flow, and the library's name for the login screen.
+  const publicDir = path.join(__dirname, '..', 'public');
+  app.use(express.static(publicDir, { index: false, maxAge: config.production ? '1h' : 0 }));
+  app.use(authRoutes(auth, log));
+  app.get('/api/info', (req, res) => {
+    const user = auth.currentUser(req);
+    const info = { libraryName: config.libraryName, authEnabled: auth.enabled };
+    if (!auth.enabled || user) {
+      const { loanDays, maxLoans, maxRenewals, holdDays, finePerDayCents, maxFineCents } = config.policy;
+      Object.assign(info, {
+        user,
+        email: notifyModes.email || null,
+        sms: notifyModes.sms || null,
+        policy: { loanDays, maxLoans, maxRenewals, holdDays, finePerDayCents, maxFineCents },
+      });
+    }
+    res.json(info);
+  });
+
+  // Everything below requires a signed-in session.
+  app.use(auth.requireAuth);
+  app.get('/', (req, res) => res.sendFile(path.join(publicDir, 'index.html')));
+  app.use('/api', catalogReadRoutes(services));
   app.use('/api', inventoryRoutes(services));
   app.use('/api', memberRoutes(services));
   app.use('/api', circulationRoutes({ pool, ...services, runJobs }));

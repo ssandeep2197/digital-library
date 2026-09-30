@@ -21,8 +21,8 @@ function bookFields(body, { partial }) {
   return fields;
 }
 
-// Public, read-only catalog browsing.
-function publicCatalogRoutes({ catalog }) {
+// Read-only catalog browsing.
+function catalogReadRoutes({ catalog }) {
   const r = express.Router();
 
   r.get('/books', wrap(async (req, res) => {
@@ -78,4 +78,4 @@ function inventoryRoutes({ catalog, circulation }) {
   return r;
 }
 
-module.exports = { publicCatalogRoutes, inventoryRoutes };
+module.exports = { catalogReadRoutes, inventoryRoutes };

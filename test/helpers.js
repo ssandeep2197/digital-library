@@ -25,15 +25,17 @@ async function databaseAvailable() {
   }
 }
 
-async function startTestApp(t, { policy = {}, apiKey = 'test-key', email, sms } = {}) {
+async function startTestApp(t, { policy = {}, admin = { user: 'staff', password: 'test-pass' }, email, sms } = {}) {
   const database = `digital_library_test_${process.pid}`;
-  const admin = await mysql.createConnection(server);
-  await admin.query(`DROP DATABASE IF EXISTS \`${database}\``);
-  await admin.query(`CREATE DATABASE \`${database}\``);
+  const root = await mysql.createConnection(server);
+  await root.query(`DROP DATABASE IF EXISTS \`${database}\``);
+  await root.query(`CREATE DATABASE \`${database}\``);
 
   const config = {
     ...baseConfig,
-    apiKey,
+    admin,
+    jwtSecret: 'test-secret-that-is-at-least-32-characters',
+    baseUrl: 'http://localhost',
     libraryName: 'Test Library',
     db: { ...server, database, connectionLimit: 10 },
     policy: { ...baseConfig.policy, loanDays: 14, maxLoans: 5, maxRenewals: 2, holdDays: 3, finePerDayCents: 25, maxFineCents: 1000, blockAtFineCents: 500, ...policy },
@@ -54,14 +56,27 @@ async function startTestApp(t, { policy = {}, apiKey = 'test-key', email, sms } 
   t.after(async () => {
     await new Promise((resolve) => http.close(resolve));
     await pool.end();
-    await admin.query(`DROP DATABASE IF EXISTS \`${database}\``);
-    await admin.end();
+    await root.query(`DROP DATABASE IF EXISTS \`${database}\``);
+    await root.end();
   });
 
-  async function api(method, path, body, { key = apiKey } = {}) {
+  // Signs in once; api() sends that session cookie unless called with { cookie: null } (or another cookie).
+  let session = null;
+  async function login(username = admin.user, password = admin.password) {
+    const res = await fetch(`${base}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    return { status: res.status, body: await res.json(), cookie: (res.headers.get('set-cookie') || '').split(';')[0] };
+  }
+  if (admin.user) session = (await login()).cookie;
+
+  async function api(method, path, body, { cookie = session, headers = {} } = {}) {
     const res = await fetch(base + path, {
       method,
-      headers: { 'Content-Type': 'application/json', ...(key ? { 'X-API-Key': key } : {}) },
+      redirect: 'manual',
+      headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}), ...headers },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await res.text();
@@ -89,7 +104,7 @@ async function startTestApp(t, { policy = {}, apiKey = 'test-key', email, sms } 
     return m.body;
   }
 
-  return { api, base, book, member, pool, services, dispatcher, sent, config };
+  return { api, base, login, session, book, member, pool, services, dispatcher, sent, config };
 }
 
 module.exports = { databaseAvailable, startTestApp };

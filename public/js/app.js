@@ -3,7 +3,7 @@
   'use strict';
 
   const view = document.getElementById('view');
-  let info = { libraryName: 'Digital Library', authRequired: false, policy: {} };
+  let info = { libraryName: 'Digital Library', authEnabled: false, user: null, policy: {} };
 
   // ---- Helpers ---------------------------------------------------------------------
 
@@ -26,8 +26,10 @@
 
   // ---- API ---------------------------------------------------------------------------
 
-  const getKey = () => { try { return sessionStorage.getItem('apiKey') || ''; } catch { return ''; } };
-  const setKey = (k) => { try { sessionStorage.setItem('apiKey', k); } catch { /* private mode */ } };
+  // Session expired or signed out elsewhere: go to the login page and come back here afterwards.
+  const redirectToLogin = () => {
+    location.href = `/login?next=${encodeURIComponent(location.pathname + location.hash)}`;
+  };
 
   class ApiError extends Error {
     constructor(status, body) {
@@ -40,13 +42,11 @@
   async function api(method, path, body) {
     const headers = { Accept: 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
-    const key = getKey();
-    if (key) headers['X-API-Key'] = key;
     const res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     const text = await res.text();
     const data = text ? JSON.parse(text) : null;
     if (res.status === 401) {
-      promptForKey('That API key was not accepted. Enter the staff API key to continue.');
+      redirectToLogin();
       throw new ApiError(401, data);
     }
     if (!res.ok) throw new ApiError(res.status, data);
@@ -141,24 +141,13 @@
     }
   });
 
-  function promptForKey(message) {
-    openForm({
-      title: 'Staff API key',
-      submitLabel: 'Use key',
-      fields: [{ name: 'key', label: message || 'Enter the API key configured on the server (API_KEY).', type: 'password', value: getKey(), required: true }],
-      onSubmit: async ({ key }) => {
-        setKey(key);
-        updateKeyButton();
-      },
-    });
-  }
-
-  function updateKeyButton() {
-    const btn = document.getElementById('key-button');
-    btn.classList.toggle('d-none', !info.authRequired);
-    btn.querySelector('span').textContent = getKey() ? 'Change key' : 'Enter key';
-  }
-  document.getElementById('key-button').addEventListener('click', () => promptForKey());
+  document.getElementById('logout-button').addEventListener('click', async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } finally {
+      location.href = '/login';
+    }
+  });
 
   // Member lookup: an input with a datalist of "Name (email) #id" suggestions.
   async function fillMemberList(listId, q) {
@@ -212,13 +201,7 @@
     try {
       await fn(...hash.match(re).slice(1));
     } catch (err) {
-      if (err.status === 401) {
-        view.innerHTML = `<div class="alert alert-warning"><i class="bi bi-key me-2"></i>This page needs the staff API key.
-          <button class="btn btn-sm btn-warning ms-2" id="enter-key">Enter key</button></div>`;
-        document.getElementById('enter-key').onclick = () => promptForKey();
-      } else {
-        view.innerHTML = `<div class="alert alert-danger">${esc(err.message)}</div>`;
-      }
+      if (err.status !== 401) view.innerHTML = `<div class="alert alert-danger">${esc(err.message)}</div>`;
     }
   }
 
@@ -722,8 +705,9 @@
     } catch { /* fall back to defaults */ }
     document.getElementById('library-name').textContent = info.libraryName;
     document.title = info.libraryName;
-    updateKeyButton();
-    if (info.authRequired && !getKey()) promptForKey();
+    if (info.authEnabled && !info.user) return redirectToLogin();
+    document.getElementById('user-name').textContent = info.user || '';
+    document.getElementById('user-menu').classList.toggle('d-none', !info.authEnabled);
     render();
   })();
 })();

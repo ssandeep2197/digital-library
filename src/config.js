@@ -7,8 +7,13 @@ module.exports = {
   port,
   production: process.env.NODE_ENV === 'production',
   trustProxy: process.env.TRUST_PROXY || false,
-  // Staff endpoints (inventory, circulation, members) require this key in the X-API-Key header.
-  apiKey: process.env.API_KEY || '',
+  // Dashboard and API sign-in. Leave unset to disable auth (local development only).
+  admin: {
+    user: process.env.ADMIN_USER || '',
+    password: process.env.ADMIN_PASSWORD || '',
+  },
+  jwtSecret: process.env.JWT_SECRET || '',
+  sessionTtlHours: num(process.env.SESSION_TTL_HOURS, 12),
   baseUrl: (process.env.BASE_URL || `http://localhost:${port}`).replace(/\/$/, ''),
   libraryName: process.env.LIBRARY_NAME || 'Digital Library',
   db: {
